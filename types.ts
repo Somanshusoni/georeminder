@@ -5,6 +5,12 @@ export type ReminderCategory =
   | 'Shopping' | 'Health' | 'Food' | 'Study'
   | 'Work' | 'Finance' | 'Travel' | 'Fitness' | 'Other';
 
+declare global {
+  interface Window {
+    google: any;
+  }
+}
+
 export interface Reminder {
   id: string;
   title: string;

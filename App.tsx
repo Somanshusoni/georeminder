@@ -25,10 +25,13 @@ import { TriggeredReminderModal } from "./components/TriggeredReminderModal";
 import { AIChatAssistant } from "./components/AIChatAssistant";
 import { speakReminder } from "./services/ttsService";
 import { categorizeReminder, generateTriggeredMessage } from "./services/geminiService";
+import { LandingPage } from "./components/LandingPage";
+import { LoginPage } from "./components/LoginPage";
 
 const App: React.FC = () => {
   /* ================= UI STATE ================= */
 
+  const [currentScreen, setCurrentScreen] = useState<"landing" | "login" | "dashboard">("landing");
   const [dark, setDark] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTriggeredReminder, setActiveTriggeredReminder] =
@@ -51,10 +54,20 @@ const App: React.FC = () => {
   });
 
   const watchIdRef = useRef<number | null>(null);
+  const remindersRef = useRef<Reminder[]>([]);
+  const triggeredIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    remindersRef.current = reminders;
+  }, [reminders]);
 
   /* ================= LOAD REMINDERS ================= */
 
+  // Only subscribe to Firestore when the user is authenticated on the dashboard.
+  // Subscribing before login causes "Missing or insufficient permissions" errors.
   useEffect(() => {
+    if (currentScreen !== "dashboard") return;
+
     const coll = collection(db, "reminders");
 
     const unsub = onSnapshot(
@@ -76,7 +89,7 @@ const App: React.FC = () => {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentScreen]);
 
   /* ================= TRACKING ================= */
 
@@ -96,42 +109,53 @@ const App: React.FC = () => {
           timestamp: Date.now(),
         });
 
-        setReminders((prev) =>
-          prev.map((r) => {
-            if (r.status !== "active") return r;
+        const triggeredThisTick: Reminder[] = [];
 
-            const dist = calculateDistance(latitude, longitude, r.lat, r.lng);
+        const nextReminders = remindersRef.current.map((r) => {
+          if (r.status !== "active") return r;
 
-            if (dist <= r.radiusMeters) {
-              speakReminder(r.originalInput || r.title);
+          const dist = calculateDistance(latitude, longitude, r.lat, r.lng);
 
-              const triggered = {
-                ...r,
-                status: "triggered" as const,
-                triggeredAt: Date.now(),
-                lastDistance: dist,
-              };
+          if (dist <= r.radiusMeters) {
+            const triggered = {
+              ...r,
+              status: "triggered" as const,
+              triggeredAt: Date.now(),
+              lastDistance: dist,
+            };
 
-              // Persist to Firestore so onSnapshot doesn't reset status back to 'active'
-              updateDoc(doc(db, "reminders", r.id), {
-                status: "triggered",
-                triggeredAt: triggered.triggeredAt,
-              }).catch((err) => console.error("Failed to mark triggered:", err));
-
-              // Generate AI contextual message for the popup
-              setAiTriggeredMessage(null);
-              generateTriggeredMessage(r.title, r.notes, r.createdAt)
-                .then((msg) => setAiTriggeredMessage(msg))
-                .catch(() => {});
-
-              setActiveTriggeredReminder(triggered);
-              return triggered;
+            if (!triggeredIdsRef.current.has(r.id)) {
+              triggeredIdsRef.current.add(r.id);
+              triggeredThisTick.push(triggered);
             }
 
-            // Note: lastDistance is local-only — never written to Firestore
-            return { ...r, lastDistance: dist };
-          }),
-        );
+            return triggered;
+          }
+
+          // Note: lastDistance is local-only — never written to Firestore
+          return { ...r, lastDistance: dist };
+        });
+
+        setReminders(nextReminders);
+        
+        // Fire external side effects outside of the React State Updater functional callback
+        triggeredThisTick.forEach(triggered => {
+          speakReminder(triggered.originalInput || triggered.title);
+
+          // Persist to Firestore so onSnapshot doesn't reset status back to 'active'
+          updateDoc(doc(db, "reminders", triggered.id), {
+            status: "triggered",
+            triggeredAt: triggered.triggeredAt,
+          }).catch((err) => console.error("Failed to mark triggered:", err));
+
+          // Generate AI contextual message for the popup
+          setAiTriggeredMessage(null);
+          generateTriggeredMessage(triggered.title, triggered.notes, triggered.createdAt)
+            .then((msg) => setAiTriggeredMessage(msg))
+            .catch(() => {});
+
+          setActiveTriggeredReminder(triggered);
+        });
       },
       (error) => {
         console.error("Geolocation error:", error);
@@ -201,6 +225,19 @@ const App: React.FC = () => {
   const filteredReminders = reminders.filter((r) => r.status === filter);
 
   /* ================= UI (UNCHANGED) ================= */
+
+  if (currentScreen === "landing") {
+    return <LandingPage onNavigateToLogin={() => setCurrentScreen("login")} />;
+  }
+
+  if (currentScreen === "login") {
+    return (
+      <LoginPage 
+        onLoginSuccess={() => setCurrentScreen("dashboard")} 
+        onBack={() => setCurrentScreen("landing")} 
+      />
+    );
+  }
 
   return (
     <motion.div
@@ -273,6 +310,87 @@ const App: React.FC = () => {
                 }`}
               >
                 {trackingStatus.active ? "Stop" : "Start"}
+              </button>
+              
+              {/* DEV TEST BUTTON */}
+              <button
+                onClick={() => {
+                  const activeReminders = remindersRef.current.filter(r => r.status === 'active');
+                  if (activeReminders.length === 0) {
+                    alert("No active reminders available to test!");
+                    return;
+                  }
+                  
+                  // Mock user coordinates to exactly match the first active reminder
+                  const target = activeReminders[0];
+                  if (navigator.geolocation && watchIdRef.current) {
+                    const mockPos = {
+                      coords: {
+                        latitude: target.lat,
+                        longitude: target.lng,
+                        accuracy: 10
+                      }
+                    } as GeolocationPosition;
+                    
+                    // Manually inject the mocked position into our state simulation 
+                    setUserLoc({
+                      lat: target.lat,
+                      lng: target.lng,
+                      accuracy: 10,
+                      timestamp: Date.now(),
+                    });
+
+                    const triggeredThisTick: Reminder[] = [];
+
+                    const nextReminders = remindersRef.current.map((r) => {
+                      if (r.status !== "active") return r;
+
+                      const dist = calculateDistance(target.lat, target.lng, r.lat, r.lng);
+
+                      if (dist <= r.radiusMeters) {
+                        const triggered = {
+                          ...r,
+                          status: "triggered" as const,
+                          triggeredAt: Date.now(),
+                          lastDistance: dist,
+                        };
+
+                        if (!triggeredIdsRef.current.has(r.id)) {
+                          triggeredIdsRef.current.add(r.id);
+                          triggeredThisTick.push(triggered);
+                        }
+
+                        return triggered;
+                      }
+
+                      return { ...r, lastDistance: dist };
+                    });
+
+                    setReminders(nextReminders);
+                    
+                    triggeredThisTick.forEach(triggered => {
+                      // Import is resolved since we use it directly below
+                      speakReminder(triggered.originalInput || triggered.title);
+
+                      updateDoc(doc(db, "reminders", triggered.id), {
+                        status: "triggered",
+                        triggeredAt: triggered.triggeredAt,
+                      }).catch(() => {});
+
+                      setAiTriggeredMessage(null);
+                      generateTriggeredMessage(triggered.title, triggered.notes, triggered.createdAt)
+                        .then((msg) => setAiTriggeredMessage(msg))
+                        .catch(() => {});
+
+                      setActiveTriggeredReminder(triggered);
+                    });
+                  } else {
+                    alert("Please click 'Start' tracking first so the mock tracking can override it!");
+                  }
+                }}
+                className="ml-2 px-4 py-2 text-sm font-semibold rounded-full bg-orange-500 text-white hover:bg-orange-600 transition"
+              >
+                Mock Arrival
               </button>
             </div>
           </motion.div>

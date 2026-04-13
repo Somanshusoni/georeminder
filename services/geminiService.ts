@@ -25,14 +25,33 @@ export async function getSmartReminderInfo(prompt: string) {
               type: Type.STRING,
               description: "Brief details about what to do.",
             },
+            locationName: {
+              type: Type.STRING,
+              description: "The specific destination or store mentioned.",
+            },
           },
-          required: ["title", "notes"],
+          required: ["title", "notes", "locationName"],
         },
       },
     });
 
-    const text = response.text;
-    if (text) return JSON.parse(text);
+    const parsed = JSON.parse(response.text || "{}");
+    
+    // Attempt to geocode via OpenStreetMap (Nominatim)
+    if (parsed.locationName) {
+      try {
+        const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(parsed.locationName)}&limit=1`);
+        const geoData = await geoRes.json();
+        if (geoData && geoData.length > 0) {
+          parsed.lat = parseFloat(geoData[0].lat);
+          parsed.lng = parseFloat(geoData[0].lon);
+        }
+      } catch (e) {
+        console.warn("Geocoding failed:", e);
+      }
+    }
+
+    return parsed;
   } catch (error) {
     console.error("Gemini Error:", error);
     return null;

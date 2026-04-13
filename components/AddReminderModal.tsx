@@ -1,9 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
-import { X, MapPin, Send, Wand2, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, MapPin, Send, Wand2, Loader2, Navigation } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { Reminder } from '../types';
 import { getSmartReminderInfo } from '../services/geminiService';
+import { calculateDistance, formatDistance } from '../utils/geoUtils';
 
 interface AddReminderModalProps {
   isOpen: boolean;
@@ -13,6 +14,31 @@ interface AddReminderModalProps {
   userLng: number;
 }
 
+const loadGoogleMaps = (callback: () => void) => {
+  if (window.google) {
+    callback();
+    return;
+  }
+  const existingScript = document.getElementById('google-maps-script');
+  if (existingScript) {
+    // Already loading or failed
+    return;
+  }
+  const script = document.createElement('script');
+  script.id = 'google-maps-script';
+  script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBr0rtcj32T4qq60zhvG8iLdmq2bIJnnZ4&libraries=places`;
+  script.async = true;
+  script.defer = true;
+  script.onload = () => {
+    console.log('Google Maps Script loaded successfully');
+    callback();
+  };
+  script.onerror = () => {
+    console.error('Failed to load Google Maps Script');
+  };
+  document.head.appendChild(script);
+};
+
 export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onClose, onSave, userLat, userLng }) => {
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
@@ -20,13 +46,44 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
   const [lat, setLat] = useState(userLat);
   const [lng, setLng] = useState(userLng);
   const [smartLoading, setSmartLoading] = useState(false);
+  const autocompleteRef = useRef<any>(null);
 
   useEffect(() => {
     if (isOpen) {
       setLat(userLat);
       setLng(userLng);
+      
+      const initAutocomplete = () => {
+        const input = document.getElementById('place-search') as HTMLInputElement;
+        if (input && window.google && !autocompleteRef.current) {
+          autocompleteRef.current = new window.google.maps.places.Autocomplete(input, {
+            fields: ['formatted_address', 'geometry', 'name'],
+          });
+
+          autocompleteRef.current.addListener('place_changed', () => {
+            const place = autocompleteRef.current.getPlace();
+            if (place.geometry && place.geometry.location) {
+              const newLat = place.geometry.location.lat();
+              const newLng = place.geometry.location.lng();
+              setLat(newLat);
+              setLng(newLng);
+              setTitle(place.name || '');
+              setNotes(place.formatted_address || '');
+            }
+          });
+        }
+      };
+
+      loadGoogleMaps(initAutocomplete);
+
+      return () => {
+        if (autocompleteRef.current && window.google) {
+          window.google.maps.event.clearInstanceListeners(autocompleteRef.current);
+          autocompleteRef.current = null;
+        }
+      };
     }
-  }, [isOpen, userLat, userLng]);
+  }, [isOpen]); // Only rerun when modal opens/closes
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,9 +114,15 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
     if (result) {
       setTitle(result.title);
       setNotes(result.notes);
+      if (result.lat && result.lng) {
+        setLat(result.lat);
+        setLng(result.lng);
+      }
     }
     setSmartLoading(false);
   };
+
+  const distanceToCurrent = calculateDistance(userLat, userLng, lat, lng);
 
   if (!isOpen) return null;
 
@@ -76,14 +139,27 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6">
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">What should I remind you?</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Search Destination (Google Maps)</label>
+              <div className="relative group">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
+                <input
+                  id="place-search"
+                  type="text"
+                  placeholder="Search for a store, mall, or place..."
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-medium"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Reminder Title</label>
               <div className="relative">
                 <input
                   type="text"
                   required
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Buy cake near this place at 5pm"
+                  placeholder="e.g. Buy milk"
                   className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none pr-10"
                 />
                 <button
@@ -135,7 +211,19 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-slate-700">Set Reminder Location</label>
+              <div className="flex flex-col gap-1">
+                <div className="flex justify-between items-end">
+                  <label className="block text-sm font-medium text-slate-700">Set Reminder Location</label>
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 text-[10px] font-bold border border-blue-100">
+                    <Navigation size={10} />
+                    {formatDistance(distanceToCurrent)} from you
+                  </div>
+                </div>
+                <p className="text-[11px] text-amber-600 font-semibold bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-100 flex items-center gap-1.5">
+                  <MapPin size={12} />
+                  Tip: If your store isn't on the map, simply tap on the map to manually place the pinpoint!
+                </p>
+              </div>
               <MapPicker 
                 key={`${lat},${lng}`}
                 initialLat={lat} 
@@ -143,6 +231,9 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
                 radius={radius}
                 onLocationSelect={(newLat, newLng) => { setLat(newLat); setLng(newLng); }} 
               />
+              <p className="text-center text-[10px] text-slate-400 italic">
+                Selected Destination: {lat.toFixed(4)}, {lng.toFixed(4)}
+              </p>
             </div>
           </div>
 
