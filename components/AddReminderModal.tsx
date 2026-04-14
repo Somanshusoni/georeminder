@@ -83,7 +83,7 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
         }
       };
     }
-  }, [isOpen]); // Only rerun when modal opens/closes
+  }, [isOpen, userLat, userLng]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
