@@ -1,11 +1,9 @@
 import React, { useState } from "react";
-import { db } from "../utils/firebase";
-import { collection, addDoc } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mail, Lock, ArrowRight, UserPlus, LogIn } from "lucide-react";
 
 interface LoginPageProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (email: string) => void;
   onBack: () => void;
 }
 
@@ -23,33 +21,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setIsLoading(true);
 
     try {
-      if (isLogin) {
-        // Test user bypass
-        if (email === "test@test.com" && password === "123") {
-          localStorage.setItem("authToken", "mock-token");
-          localStorage.setItem("userEmail", email);
-          onLoginSuccess();
-          return;
-        }
-        
-        // In a real app, you would verify against your DB here.
-        // For this demo, let's just allow anyone to log in if they exist in local storage or something,
-        // but for now, we'll keep the test user and fallback alert.
-        alert("For demo purposes, please use: test@test.com / 123");
-      } else {
-        // Sign Up: Fallback to DB create
-        await addDoc(collection(db, "users"), {
-          email,
-          password,
-          createdAt: Date.now(),
-        });
-        localStorage.setItem("authToken", "db-user-token");
-        localStorage.setItem("userEmail", email);
-        onLoginSuccess();
+      // Simple email/password validation
+      if (!email.trim() || !password.trim()) {
+        alert("Please enter both email and password.");
+        return;
       }
+
+      if (password.length < 3) {
+        alert("Password must be at least 3 characters.");
+        return;
+      }
+
+      // Store user info locally
+      localStorage.setItem("authToken", "user-token-" + Date.now());
+      localStorage.setItem("userEmail", email);
+      
+      onLoginSuccess(email);
     } catch (error) {
-      console.error("Error during authentication:", error);
-      alert("Authentication failed. " + (error instanceof Error ? error.message : ""));
+      console.error("Login error:", error);
+      alert("Something went wrong. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -215,7 +205,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         </p>
 
         <p className="mt-4 text-center text-xs font-medium text-slate-400">
-          Demo: test@test.com / 123
+          Use any email & password to get started
         </p>
       </motion.div>
     </div>

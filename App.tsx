@@ -6,6 +6,8 @@ import {
   doc,
   onSnapshot,
   updateDoc,
+  query,
+  where,
 } from "firebase/firestore";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -22,6 +24,7 @@ import { Reminder, UserLocation, GeoStatus } from "./types";
 import { calculateDistance, formatDistance } from "./utils/geoUtils";
 import { AddReminderModal } from "./components/AddReminderModal";
 import { TriggeredReminderModal } from "./components/TriggeredReminderModal";
+import { MapView } from "./components/MapView";
 import { AIChatAssistant } from "./components/AIChatAssistant";
 import { speakReminder } from "./services/ttsService";
 import { categorizeReminder, generateTriggeredMessage } from "./services/geminiService";
@@ -32,7 +35,10 @@ const App: React.FC = () => {
   /* ================= UI STATE ================= */
 
   const [currentScreen, setCurrentScreen] = useState<"landing" | "login" | "dashboard">("landing");
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
   const [dark, setDark] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "map">("list");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTriggeredReminder, setActiveTriggeredReminder] =
     useState<Reminder | null>(null);
@@ -61,30 +67,51 @@ const App: React.FC = () => {
     remindersRef.current = reminders;
   }, [reminders]);
 
+  /* ================= AUTH PERSISTENCE ================= */
+  useEffect(() => {
+    const token = localStorage.getItem("authToken");
+    const email = localStorage.getItem("userEmail");
+    
+    if (token && email) {
+      setUserEmail(email);
+      setCurrentScreen("dashboard");
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+    }
+    setIsInitializing(false);
+  }, [currentScreen]);
+
   /* ================= LOAD REMINDERS ================= */
 
-  // Only subscribe to Firestore when the user is authenticated on the dashboard.
-  // Subscribing before login causes "Missing or insufficient permissions" errors.
   useEffect(() => {
-    if (currentScreen !== "dashboard") return;
+    if (currentScreen !== "dashboard" || !userEmail) return;
 
-    const coll = collection(db, "reminders");
+    // Isolate data by the mock user's email
+    const q = query(collection(db, "reminders"), where("userEmail", "==", userEmail));
 
     const unsub = onSnapshot(
-      coll,
+      q,
       (snapshot) => {
         const loaded = snapshot.docs.map((d) => {
-          // Destructure out any embedded 'id' field from document data
-          // so the real Firestore document ID (d.id) always wins.
-          const { id: _discarded, ...rest } = d.data() as Reminder;
-          return { id: d.id, ...rest };
+          const data = d.data() as Reminder;
+          const { id: _discarded, ...rest } = data;
+          const existing = remindersRef.current.find(r => r.id === d.id);
+          
+          return { 
+            id: d.id, 
+            status: 'active',
+            ...rest,
+            lastDistance: existing?.lastDistance || rest.lastDistance
+          };
         });
 
-        console.log("Reminders updated from Firestore:", loaded);
+        console.log("Reminders updated from Firestore:", loaded.length);
         setReminders(loaded);
       },
       (err) => {
         console.error("onSnapshot error:", err);
+        setTrackingStatus(prev => ({ ...prev, error: `Firestore Error: ${err.message}` }));
       },
     );
 
@@ -142,6 +169,14 @@ const App: React.FC = () => {
         triggeredThisTick.forEach(triggered => {
           speakReminder(triggered.originalInput || triggered.title);
 
+          // Browser Notification
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification(`🔔 Arrived at ${triggered.title}`, {
+              body: triggered.notes || "You have a reminder here!",
+              icon: "/icon-192.png",
+            });
+          }
+
           // Persist to Firestore so onSnapshot doesn't reset status back to 'active'
           updateDoc(doc(db, "reminders", triggered.id), {
             status: "triggered",
@@ -181,18 +216,24 @@ const App: React.FC = () => {
   const handleAddReminder = async (
     data: Omit<Reminder, "id" | "createdAt" | "status">,
   ) => {
-    const docRef = await addDoc(collection(db, "reminders"), {
-      ...data,
-      createdAt: Date.now(),
-      status: "active",
-    });
+    if (!userEmail) return;
+    try {
+      const docRef = await addDoc(collection(db, "reminders"), {
+        ...data,
+        userEmail: userEmail, // Identify which user this belongs to
+        createdAt: Date.now(),
+        status: "active",
+      });
 
-    // Fire-and-forget: auto-categorize with Gemini then patch the doc
-    categorizeReminder(data.title, data.notes)
-      .then(({ category, emoji, categoryColor }) =>
-        updateDoc(doc(db, "reminders", docRef.id), { category, emoji, categoryColor })
-      )
-      .catch(() => {});
+      categorizeReminder(data.title, data.notes)
+        .then(({ category, emoji, categoryColor }) =>
+          updateDoc(doc(db, "reminders", docRef.id), { category, emoji, categoryColor })
+        )
+        .catch(() => {});
+    } catch (err: any) {
+      console.error("Failed to add reminder:", err);
+      alert("Error: " + err.message);
+    }
   };
 
   /* ================= DELETE ================= */
@@ -222,9 +263,29 @@ const App: React.FC = () => {
     }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem("authToken");
+    localStorage.removeItem("userEmail");
+    setUserEmail(null);
+    setReminders([]);
+    setCurrentScreen("landing");
+  };
+
   const filteredReminders = reminders.filter((r) => r.status === filter);
 
-  /* ================= UI (UNCHANGED) ================= */
+  /* ================= UI RENDERING ================= */
+
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <motion.div 
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full"
+        />
+      </div>
+    );
+  }
 
   if (currentScreen === "landing") {
     return <LandingPage onNavigateToLogin={() => setCurrentScreen("login")} />;
@@ -233,7 +294,10 @@ const App: React.FC = () => {
   if (currentScreen === "login") {
     return (
       <LoginPage 
-        onLoginSuccess={() => setCurrentScreen("dashboard")} 
+        onLoginSuccess={(email) => {
+          setUserEmail(email);
+          setCurrentScreen("dashboard");
+        }} 
         onBack={() => setCurrentScreen("landing")} 
       />
     );
@@ -253,20 +317,29 @@ const App: React.FC = () => {
       <div className="w-full min-h-screen flex justify-center">
         <div className="w-full max-w-xl px-6 py-10 relative z-10">
           {/* Header */}
-          <div className="flex justify-between items-center mb-10">
+          <div className="flex justify-between items-start mb-10">
             <div>
               <h1 className="text-5xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 bg-clip-text text-transparent">
                 GeoReminder
               </h1>
-              <p className="text-slate-500 text-sm mt-2 font-medium">
-                Smart location alerts that trigger exactly when you arrive.
-              </p>
+              <div className="flex items-center gap-2 mt-2">
+                <p className="text-slate-500 text-sm font-medium">
+                  {userEmail || "Guest"}
+                </p>
+                <span className="w-1 h-1 rounded-full bg-slate-300" />
+                <button 
+                  onClick={handleLogout}
+                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition"
+                >
+                  Sign Out
+                </button>
+              </div>
             </div>
 
             <div className="flex gap-3">
               <button
                 onClick={() => setDark(!dark)}
-                className="p-2 rounded-xl bg-white/70 backdrop-blur shadow-md hover:scale-110 transition"
+                className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/70 backdrop-blur shadow-md hover:scale-110 transition"
               >
                 {dark ? <Sun size={18} /> : <Moon size={18} />}
               </button>
@@ -395,90 +468,139 @@ const App: React.FC = () => {
             </div>
           </motion.div>
 
-          {/* Filter Tabs */}
-          <div className="flex bg-white/60 backdrop-blur-xl border rounded-2xl p-1 shadow-md mb-6">
-            {(["active", "triggered", "completed"] as const).map((type) => (
-              <button
-                key={type}
-                onClick={() => setFilter(type)}
-                className={`flex-1 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                  filter === type
-                    ? "bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                {type}
-              </button>
-            ))}
-          </div>
-
-          {/* Reminder List */}
-          <AnimatePresence>
-            <div className="space-y-4">
-              {filteredReminders.map((reminder) => (
-                <motion.div
-                  key={reminder.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  whileHover={{ y: -4 }}
-                  className="relative z-10 bg-white/80 backdrop-blur-xl p-6 rounded-3xl border border-slate-200 shadow-xl transition-all duration-300"
+          {/* View Toggle & Filter Tabs */}
+          <div className="flex gap-4 mb-6">
+            <div className="flex-1 flex bg-white/60 backdrop-blur-xl border rounded-2xl p-1 shadow-md">
+              {(["active", "triggered", "completed"] as const).map((type) => (
+                <button
+                  key={type}
+                  onClick={() => setFilter(type)}
+                  className={`flex-1 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                    filter === type
+                      ? "bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
                 >
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex-1 mr-3">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <h3 className="font-bold text-lg">{reminder.title}</h3>
-                        {reminder.emoji && reminder.categoryColor && (
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${reminder.categoryColor}`}>
-                            {reminder.emoji} {reminder.category}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => deleteReminder(reminder.id)}
-                      disabled={deletingId === reminder.id}
-                      className={`transition shrink-0 ${
-                        deletingId === reminder.id
-                          ? "opacity-25 cursor-not-allowed"
-                          : "opacity-50 hover:text-red-500 hover:opacity-100"
-                      }`}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-
-                  {reminder.notes && (
-                    <p className="text-sm opacity-70 mb-3">{reminder.notes}</p>
-                  )}
-
-                  <div className="flex gap-3 text-xs font-medium">
-                    <div className="flex items-center gap-1 bg-indigo-100 text-indigo-600 px-2 py-1 rounded-md">
-                      <MapPin size={12} />
-                      {reminder.radiusMeters}m
-                    </div>
-
-                    {reminder.lastDistance && (
-                      <div className="bg-gray-100 px-2 py-1 rounded-md">
-                        {formatDistance(reminder.lastDistance)}
-                      </div>
-                    )}
-                  </div>
-
-                  {reminder.status === "triggered" && (
-                    <button
-                      onClick={() => completeReminder(reminder.id)}
-                      className="mt-4 w-full py-2 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition flex items-center justify-center gap-2"
-                    >
-                      <CheckCircle2 size={16} />
-                      Mark as Done
-                    </button>
-                  )}
-                </motion.div>
+                  {type}
+                </button>
               ))}
             </div>
-          </AnimatePresence>
+
+            <button
+              onClick={() => setViewMode(viewMode === "list" ? "map" : "list")}
+              className="px-4 bg-white/60 backdrop-blur-xl border rounded-2xl shadow-md text-indigo-600 font-bold text-sm hover:bg-white transition"
+            >
+              {viewMode === "list" ? "Map View" : "List View"}
+            </button>
+          </div>
+
+          {/* Body Content */}
+          <div className="relative">
+            <AnimatePresence mode="wait">
+              {viewMode === "map" ? (
+                <motion.div
+                  key="map-view"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                >
+                  <MapView 
+                    reminders={filteredReminders} 
+                    userLoc={userLoc} 
+                    filter={filter} 
+                  />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="list-view"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-4"
+                >
+                  <AnimatePresence mode="popLayout">
+                    {filteredReminders.length === 0 ? (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="text-center py-12 bg-white/40 rounded-3xl border border-dashed border-slate-300"
+                      >
+                        <p className="text-slate-400 font-medium whitespace-pre-line">
+                          {filter === 'active' 
+                            ? "Your world is quiet.\nTap + to map a new memory." 
+                            : `No ${filter} reminders yet.`}
+                        </p>
+                      </motion.div>
+                    ) : (
+                      filteredReminders.map((reminder) => (
+                        <motion.div
+                          key={reminder.id}
+                          layout
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          whileHover={{ y: -4 }}
+                          className="relative z-10 bg-white/80 backdrop-blur-xl p-6 rounded-3xl border border-slate-200 shadow-xl transition-all duration-300"
+                        >
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex-1 mr-3">
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                <h3 className="font-bold text-lg">{reminder.title}</h3>
+                                {reminder.emoji && reminder.categoryColor && (
+                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${reminder.categoryColor}`}>
+                                    {reminder.emoji} {reminder.category}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => deleteReminder(reminder.id)}
+                              disabled={deletingId === reminder.id}
+                              className={`transition shrink-0 ${
+                                deletingId === reminder.id
+                                  ? "opacity-25 cursor-not-allowed"
+                                  : "opacity-50 hover:text-red-500 hover:opacity-100"
+                              }`}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+
+                          {reminder.notes && (
+                            <p className="text-sm opacity-70 mb-3">{reminder.notes}</p>
+                          )}
+
+                          <div className="flex gap-3 text-xs font-medium">
+                            <div className="flex items-center gap-1 bg-indigo-100 text-indigo-600 px-2 py-1 rounded-md">
+                              <MapPin size={12} />
+                              {reminder.radiusMeters}m
+                            </div>
+
+                            {reminder.lastDistance && (
+                              <div className="bg-gray-100 px-2 py-1 rounded-md">
+                                {formatDistance(reminder.lastDistance)}
+                              </div>
+                            )}
+                          </div>
+
+                          {reminder.status === "triggered" && (
+                            <button
+                              onClick={() => completeReminder(reminder.id)}
+                              className="mt-4 w-full py-2 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition flex items-center justify-center gap-2"
+                            >
+                              <CheckCircle2 size={16} />
+                              Mark as Done
+                            </button>
+                          )}
+                        </motion.div>
+                      ))
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
