@@ -30,6 +30,8 @@ interface MapViewProps {
   reminders: Reminder[];
   userLoc: UserLocation | null;
   filter: string;
+  navigatingId?: string | null;
+  onNavigate?: (id: string) => void;
 }
 
 const MapController = ({ userLoc }: { userLoc: UserLocation | null }) => {
@@ -42,7 +44,7 @@ const MapController = ({ userLoc }: { userLoc: UserLocation | null }) => {
   return null;
 };
 
-export const MapView: React.FC<MapViewProps> = ({ reminders, userLoc, filter }) => {
+export const MapView: React.FC<MapViewProps> = ({ reminders, userLoc, filter, navigatingId, onNavigate }) => {
   const center: [number, number] = userLoc ? [userLoc.lat, userLoc.lng] : [0, 0];
 
   return (
@@ -80,6 +82,20 @@ export const MapView: React.FC<MapViewProps> = ({ reminders, userLoc, filter }) 
                       {r.items.map((item, i) => <li key={i}>{item}</li>)}
                     </ul>
                   )}
+                  
+                  {filter === 'active' && onNavigate && (
+                    <button
+                      onClick={() => onNavigate(r.id)}
+                      className={`w-full mb-2 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                        navigatingId === r.id 
+                          ? "bg-red-100 text-red-600 hover:bg-red-200" 
+                          : "bg-blue-600 text-white hover:bg-blue-700"
+                      }`}
+                    >
+                      {navigatingId === r.id ? "Stop Routing" : "Navigate Here"}
+                    </button>
+                  )}
+
                   <div className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-500">
                     <div className="flex justify-between items-center">
                       <span>{r.radiusMeters}m radius</span>
@@ -105,7 +121,7 @@ export const MapView: React.FC<MapViewProps> = ({ reminders, userLoc, filter }) 
                 dashArray: '5, 10'
               }} 
             />
-            {r.routePoints && r.routePoints.length > 0 && (
+            {r.routePoints && r.routePoints.length > 0 && navigatingId === r.id && (
               <Polyline 
                 positions={r.routePoints} 
                 pathOptions={{ 

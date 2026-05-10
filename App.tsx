@@ -44,6 +44,7 @@ const App: React.FC = () => {
   const [activeTriggeredReminder, setActiveTriggeredReminder] =
     useState<Reminder | null>(null);
   const [aiTriggeredMessage, setAiTriggeredMessage] = useState<string | null>(null);
+  const [navigatingId, setNavigatingId] = useState<string | null>(null);
 
   /* ================= APP STATE ================= */
 
@@ -126,7 +127,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!trackingStatus.active || !userLoc) return;
 
-    const activeReminders = remindersRef.current.filter(r => r.status === 'active');
+    const activeReminders = remindersRef.current.filter(r => r.status === 'active' && r.id === navigatingId);
     if (activeReminders.length === 0) return;
 
     const needsInitialFetch = activeReminders.some(r => r.routeDistance === undefined);
@@ -198,15 +199,22 @@ const App: React.FC = () => {
 
         if (hasChanges) {
            setReminders(prev => prev.map(p => {
+              // If it's the updated one, merge it. 
+              // If it's NOT the navigating target anymore, clear its old route data to avoid stale lines.
               const updated = updatedReminders.find(u => u.id === p.id);
-              return updated ? { ...p, ...updated } : p;
+              if (updated) {
+                return { ...p, ...updated };
+              } else if (p.routePoints && p.id !== navigatingId) {
+                return { ...p, routePoints: undefined, routeDistance: undefined, routeETA: undefined };
+              }
+              return p;
            }));
         }
       };
 
       fetchRoutes();
     }
-  }, [userLoc?.lat, userLoc?.lng, trackingStatus.active]);
+  }, [userLoc?.lat, userLoc?.lng, trackingStatus.active, navigatingId]);
 
   const startTracking = useCallback(() => {
     if (!navigator.geolocation) return;
@@ -597,6 +605,8 @@ const App: React.FC = () => {
                     reminders={filteredReminders} 
                     userLoc={userLoc} 
                     filter={filter} 
+                    navigatingId={navigatingId}
+                    onNavigate={(id) => setNavigatingId(navigatingId === id ? null : id)}
                   />
                 </motion.div>
               ) : (
@@ -629,7 +639,11 @@ const App: React.FC = () => {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.95 }}
                           whileHover={{ y: -4 }}
-                          className="relative z-10 bg-white/80 backdrop-blur-xl p-6 rounded-3xl border border-slate-200 shadow-xl transition-all duration-300"
+                          className={`relative z-10 p-6 rounded-3xl border shadow-xl transition-all duration-300 ${
+                            navigatingId === reminder.id && filter === 'active'
+                              ? "bg-blue-50/90 backdrop-blur-xl border-blue-400 ring-2 ring-blue-500/30"
+                              : "bg-white/80 backdrop-blur-xl border-slate-200"
+                          }`}
                         >
                           <div className="flex justify-between items-start mb-2">
                             <div className="flex-1 mr-3">
@@ -643,17 +657,31 @@ const App: React.FC = () => {
                               </div>
                             </div>
 
-                            <button
-                              onClick={() => deleteReminder(reminder.id)}
-                              disabled={deletingId === reminder.id}
-                              className={`transition shrink-0 ${
-                                deletingId === reminder.id
-                                  ? "opacity-25 cursor-not-allowed"
-                                  : "opacity-50 hover:text-red-500 hover:opacity-100"
-                              }`}
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {filter === 'active' && (
+                                <button
+                                  onClick={() => setNavigatingId(navigatingId === reminder.id ? null : reminder.id)}
+                                  className={`px-3 py-1 text-xs font-bold rounded-xl transition-colors ${
+                                    navigatingId === reminder.id
+                                      ? "bg-red-100 text-red-600 hover:bg-red-200"
+                                      : "bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-200"
+                                  }`}
+                                >
+                                  {navigatingId === reminder.id ? "Stop Route" : "Navigate"}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => deleteReminder(reminder.id)}
+                                disabled={deletingId === reminder.id}
+                                className={`transition p-1.5 rounded-lg ${
+                                  deletingId === reminder.id
+                                    ? "opacity-25 cursor-not-allowed"
+                                    : "opacity-50 hover:bg-red-50 hover:text-red-500 hover:opacity-100"
+                                }`}
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
                           </div>
 
                           {reminder.items && reminder.items.length > 0 && (
