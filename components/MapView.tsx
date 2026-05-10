@@ -36,9 +36,12 @@ interface MapViewProps {
 
 const MapController = ({ userLoc }: { userLoc: UserLocation | null }) => {
   const map = useMap();
+  const hasCentered = React.useRef(false);
+  
   React.useEffect(() => {
-    if (userLoc) {
+    if (userLoc && !hasCentered.current) {
       map.flyTo([userLoc.lat, userLoc.lng], 14, { duration: 1.5 });
+      hasCentered.current = true;
     }
   }, [userLoc, map]);
   return null;

@@ -216,7 +216,7 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
                             setLng(result.lng);
                             
                             // Auto-fill form fields
-                            if (result.storeName) {
+                            if (result.storeName && !title) {
                               setTitle(result.storeName);
                             }
                             
