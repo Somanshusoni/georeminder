@@ -416,10 +416,10 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
                   onChange={(e) => setRadius(Number(e.target.value))}
                   className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                 >
-                  <option value={100}>100m (Nearby)</option>
-                  <option value={200}>200m (Walking)</option>
-                  <option value={500}>500m (Standard)</option>
-                  <option value={1000}>1km (Driving)</option>
+                  <option value={100}>100m</option>
+                  <option value={200}>200m</option>
+                  <option value={500}>500m</option>
+                  <option value={1000}>1km</option>
                 </select>
               </div>
               <div className="flex items-end">

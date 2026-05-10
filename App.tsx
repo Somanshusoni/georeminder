@@ -126,15 +126,17 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!trackingStatus.active || !userLoc) return;
 
+    const activeReminders = remindersRef.current.filter(r => r.status === 'active');
+    if (activeReminders.length === 0) return;
+
+    const needsInitialFetch = activeReminders.some(r => r.routeDistance === undefined);
     const now = Date.now();
-    if (now - lastRouteFetch.current > 180000) { // 3 mins polling interval
+
+    if (needsInitialFetch || now - lastRouteFetch.current > 180000) { // 3 mins polling interval
       lastRouteFetch.current = now;
 
       const fetchRoutes = async () => {
         const tomtomKey = import.meta.env.VITE_TOMTOM_API_KEY;
-        const activeReminders = remindersRef.current.filter(r => r.status === 'active');
-        
-        if (activeReminders.length === 0) return;
         
         let hasChanges = false;
         const updatedReminders = await Promise.all(activeReminders.map(async (r) => {
