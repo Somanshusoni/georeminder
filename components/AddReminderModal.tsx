@@ -61,7 +61,7 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
     const finalNotes = locationInput ? `Location: ${locationInput}${finalItemsStr ? ` | Items: ${finalItemsStr}` : ""}` : finalItemsStr;
     const fullInput = finalNotes ? `${finalTitle}: ${finalNotes}` : finalTitle;
     
-    onSave({ 
+    const reminderData: any = { 
       title: finalTitle, 
       items, 
       originalInput: fullInput,
@@ -69,8 +69,11 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
       lat, 
       lng,
       travelMode,
-      searchCategory: isDynamicNearest && searchCategory ? searchCategory : undefined
-    });
+    };
+    if (isDynamicNearest && searchCategory) {
+      reminderData.searchCategory = searchCategory;
+    }
+    onSave(reminderData);
     
     setTitle('');
     setLocationInput('');
