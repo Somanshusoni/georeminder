@@ -171,8 +171,15 @@ const App: React.FC = () => {
           let routePoints = r.routePoints;
           
           try {
+            const modeMap: Record<string, string> = {
+              'walking': 'pedestrian',
+              'driving': 'car',
+              'cycling': 'bicycle'
+            };
+            const ttMode = modeMap[r.travelMode || 'walking'] || 'pedestrian';
+
             const routeRes = await fetch(
-              `https://api.tomtom.com/routing/1/calculateRoute/${userLoc.lat},${userLoc.lng}:${targetLat},${targetLng}/json?key=${tomtomKey}&travelMode=${r.travelMode || 'walking'}`
+              `https://api.tomtom.com/routing/1/calculateRoute/${userLoc.lat},${userLoc.lng}:${targetLat},${targetLng}/json?key=${tomtomKey}&travelMode=${ttMode}`
             );
             const routeData = await routeRes.json();
             if (routeData.routes && routeData.routes[0]) {
