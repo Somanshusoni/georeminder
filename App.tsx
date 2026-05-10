@@ -73,7 +73,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const token = localStorage.getItem("authToken");
     const email = localStorage.getItem("userEmail");
-    
+
     if (token && email) {
       setUserEmail(email);
       setCurrentScreen("dashboard");
@@ -99,9 +99,9 @@ const App: React.FC = () => {
           const data = d.data() as Reminder;
           const { id: _discarded, ...rest } = data;
           const existing = remindersRef.current.find(r => r.id === d.id);
-          
-          return { 
-            id: d.id, 
+
+          return {
+            id: d.id,
             status: 'active',
             ...rest,
             lastDistance: existing?.lastDistance || rest.lastDistance
@@ -138,7 +138,7 @@ const App: React.FC = () => {
 
       const fetchRoutes = async () => {
         const tomtomKey = import.meta.env.VITE_TOMTOM_API_KEY;
-        
+
         let hasChanges = false;
         const updatedReminders = await Promise.all(activeReminders.map(async (r) => {
           let targetLat = r.lat;
@@ -161,25 +161,25 @@ const App: React.FC = () => {
               );
               const baseRouteData = await baseRouteRes.json();
               if (baseRouteData.routes && baseRouteData.routes[0]) {
-                // Extract points for LineString (lon, lat)
-                const points = baseRouteData.routes[0].legs[0].points.map((p: any) => [p.longitude, p.latitude]);
-                
+                // Extract points for TomTom Search Along Route format ({lat, lon})
+                const points = baseRouteData.routes[0].legs[0].points.map((p: any) => ({ lat: p.latitude, lon: p.longitude }));
+
                 // Search Along Route (POST)
                 const searchRes = await fetch(
                   `https://api.tomtom.com/search/2/searchAlongRoute/${encodeURIComponent(r.searchCategory)}.json?key=${tomtomKey}&maxDetourTime=900&limit=1`,
                   {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ route: { lineString: points } })
+                    body: JSON.stringify({ route: { points } })
                   }
                 );
                 const searchData = await searchRes.json();
                 if (searchData.results && searchData.results[0]) {
                   const waypoint = searchData.results[0].position;
                   if (waypoint.lat !== targetLat || waypoint.lon !== targetLng) {
-                     targetLat = waypoint.lat;
-                     targetLng = waypoint.lon;
-                     changed = true;
+                    targetLat = waypoint.lat;
+                    targetLng = waypoint.lon;
+                    changed = true;
                   }
                 }
               }
@@ -210,14 +210,19 @@ const App: React.FC = () => {
           let routeDist = r.routeDistance;
           let routeETA = r.routeETA;
           let routePoints = r.routePoints;
-          
+
           try {
             const ttMode = modeMap[r.travelMode || 'walking'] || 'pedestrian';
 
             // Route coordinates string: origin:waypoint1:destination
             let routeCoords = `${userLoc.lat},${userLoc.lng}:${targetLat},${targetLng}`;
             if (r.isWaypointRouting && r.finalLat && r.finalLng) {
-               routeCoords = `${userLoc.lat},${userLoc.lng}:${targetLat},${targetLng}:${r.finalLat},${r.finalLng}`;
+               // If no shop was found yet, targetLat is still userLoc.lat. Just route straight to destination!
+               if (targetLat === userLoc.lat && targetLng === userLoc.lng) {
+                 routeCoords = `${userLoc.lat},${userLoc.lng}:${r.finalLat},${r.finalLng}`;
+               } else {
+                 routeCoords = `${userLoc.lat},${userLoc.lng}:${targetLat},${targetLng}:${r.finalLat},${r.finalLng}`;
+               }
             }
 
             const routeRes = await fetch(
@@ -229,12 +234,12 @@ const App: React.FC = () => {
               routeDist = summary.lengthInMeters;
               const mins = Math.ceil(summary.travelTimeInSeconds / 60);
               routeETA = `${mins} min${mins > 1 ? 's' : ''}`;
-              
+
               // Flatten points across all legs (multiple legs for waypoint routes)
               const allPoints: [number, number][] = [];
               routeData.routes[0].legs.forEach((leg: any) => {
                 if (leg.points) {
-                   allPoints.push(...leg.points.map((p: any) => [p.latitude, p.longitude] as [number, number]));
+                  allPoints.push(...leg.points.map((p: any) => [p.latitude, p.longitude] as [number, number]));
                 }
               });
               routePoints = allPoints;
@@ -245,11 +250,11 @@ const App: React.FC = () => {
               routeETA = "No Route Possible";
               changed = true;
             }
-          } catch(e) {
-             console.error("Route fetch failed", e);
-             routeDist = -1;
-             routeETA = "API Error";
-             changed = true;
+          } catch (e: any) {
+            console.error("Route fetch failed", e);
+            routeDist = -1;
+            routeETA = "Err: " + (e.message || "Unknown").substring(0, 20);
+            changed = true;
           }
 
           if (changed) {
@@ -260,17 +265,17 @@ const App: React.FC = () => {
         }));
 
         if (hasChanges) {
-           setReminders(prev => prev.map(p => {
-              // If it's the updated one, merge it. 
-              // If it's NOT the navigating target anymore, clear its old route data to avoid stale lines.
-              const updated = updatedReminders.find(u => u.id === p.id);
-              if (updated) {
-                return { ...p, ...updated };
-              } else if (p.routePoints && p.id !== navigatingId) {
-                return { ...p, routePoints: undefined, routeDistance: undefined, routeETA: undefined };
-              }
-              return p;
-           }));
+          setReminders(prev => prev.map(p => {
+            // If it's the updated one, merge it. 
+            // If it's NOT the navigating target anymore, clear its old route data to avoid stale lines.
+            const updated = updatedReminders.find(u => u.id === p.id);
+            if (updated) {
+              return { ...p, ...updated };
+            } else if (p.routePoints && p.id !== navigatingId) {
+              return { ...p, routePoints: undefined, routeDistance: undefined, routeETA: undefined };
+            }
+            return p;
+          }));
         }
       };
 
@@ -322,7 +327,7 @@ const App: React.FC = () => {
         });
 
         setReminders(nextReminders);
-        
+
         // Fire external side effects outside of the React State Updater functional callback
         triggeredThisTick.forEach(triggered => {
           speakReminder(triggered.originalInput || triggered.title);
@@ -345,7 +350,7 @@ const App: React.FC = () => {
           setAiTriggeredMessage(null);
           generateTriggeredMessage(triggered.title, triggered.items ? triggered.items.join(', ') : "", triggered.createdAt)
             .then((msg) => setAiTriggeredMessage(msg))
-            .catch(() => {});
+            .catch(() => { });
 
           setActiveTriggeredReminder(triggered);
         });
@@ -388,7 +393,7 @@ const App: React.FC = () => {
         .then(({ category, emoji, categoryColor }) =>
           updateDoc(doc(db, "reminders", docRef.id), { category, emoji, categoryColor })
         )
-        .catch(() => {});
+        .catch(() => { });
     } catch (err: any) {
       console.error("Failed to add reminder:", err);
       alert("Error: " + err.message);
@@ -437,7 +442,7 @@ const App: React.FC = () => {
   if (isInitializing) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <motion.div 
+        <motion.div
           animate={{ rotate: 360 }}
           transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
           className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full"
@@ -452,12 +457,12 @@ const App: React.FC = () => {
 
   if (currentScreen === "login") {
     return (
-      <LoginPage 
+      <LoginPage
         onLoginSuccess={(email) => {
           setUserEmail(email);
           setCurrentScreen("dashboard");
-        }} 
-        onBack={() => setCurrentScreen("landing")} 
+        }}
+        onBack={() => setCurrentScreen("landing")}
       />
     );
   }
@@ -466,11 +471,10 @@ const App: React.FC = () => {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className={`min-h-screen transition-all duration-500 ${
-        dark
+      className={`min-h-screen transition-all duration-500 ${dark
           ? "bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white"
           : "bg-gradient-to-br from-indigo-50 via-white to-purple-50"
-      } font-[Inter] relative overflow-hidden`}
+        } font-[Inter] relative overflow-hidden`}
     >
       <div className="absolute -top-20 -left-20 w-[400px] h-[400px] bg-indigo-400/30 rounded-full blur-3xl pointer-events-none" />
       <div className="w-full min-h-screen flex justify-center">
@@ -486,7 +490,7 @@ const App: React.FC = () => {
                   {userEmail || "Guest"}
                 </p>
                 <span className="w-1 h-1 rounded-full bg-slate-300" />
-                <button 
+                <button
                   onClick={handleLogout}
                   className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition"
                 >
@@ -522,11 +526,10 @@ const App: React.FC = () => {
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-2">
                 <Activity
-                  className={`${
-                    trackingStatus.active
+                  className={`${trackingStatus.active
                       ? "text-green-500 animate-pulse"
                       : "text-gray-400"
-                  }`}
+                    }`}
                 />
                 <span className="font-semibold">
                   {trackingStatus.active ? "Tracking Active" : "Tracking Off"}
@@ -535,15 +538,14 @@ const App: React.FC = () => {
 
               <button
                 onClick={trackingStatus.active ? stopTracking : startTracking}
-                className={`px-4 py-2 text-sm font-semibold rounded-full ${
-                  trackingStatus.active
+                className={`px-4 py-2 text-sm font-semibold rounded-full ${trackingStatus.active
                     ? "bg-red-500 text-white"
                     : "bg-green-500 text-white"
-                }`}
+                  }`}
               >
                 {trackingStatus.active ? "Stop" : "Start"}
               </button>
-              
+
               {/* DEV TEST BUTTON */}
               <button
                 onClick={() => {
@@ -552,7 +554,7 @@ const App: React.FC = () => {
                     alert("No active reminders available to test!");
                     return;
                   }
-                  
+
                   // Mock user coordinates to exactly match the first active reminder
                   const target = activeReminders[0];
                   if (navigator.geolocation && watchIdRef.current) {
@@ -563,7 +565,7 @@ const App: React.FC = () => {
                         accuracy: 10
                       }
                     } as GeolocationPosition;
-                    
+
                     // Manually inject the mocked position into our state simulation 
                     setUserLoc({
                       lat: target.lat,
@@ -599,7 +601,7 @@ const App: React.FC = () => {
                     });
 
                     setReminders(nextReminders);
-                    
+
                     triggeredThisTick.forEach(triggered => {
                       // Import is resolved since we use it directly below
                       speakReminder(triggered.originalInput || triggered.title);
@@ -607,12 +609,12 @@ const App: React.FC = () => {
                       updateDoc(doc(db, "reminders", triggered.id), {
                         status: "triggered",
                         triggeredAt: triggered.triggeredAt,
-                      }).catch(() => {});
+                      }).catch(() => { });
 
                       setAiTriggeredMessage(null);
                       generateTriggeredMessage(triggered.title, triggered.items ? triggered.items.join(', ') : "", triggered.createdAt)
                         .then((msg) => setAiTriggeredMessage(msg))
-                        .catch(() => {});
+                        .catch(() => { });
 
                       setActiveTriggeredReminder(triggered);
                     });
@@ -634,11 +636,10 @@ const App: React.FC = () => {
                 <button
                   key={type}
                   onClick={() => setFilter(type)}
-                  className={`flex-1 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                    filter === type
+                  className={`flex-1 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${filter === type
                       ? "bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md"
                       : "text-slate-500 hover:text-slate-800"
-                  }`}
+                    }`}
                 >
                   {type}
                 </button>
@@ -663,10 +664,10 @@ const App: React.FC = () => {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.98 }}
                 >
-                  <MapView 
-                    reminders={filteredReminders} 
-                    userLoc={userLoc} 
-                    filter={filter} 
+                  <MapView
+                    reminders={filteredReminders}
+                    userLoc={userLoc}
+                    filter={filter}
                     navigatingId={navigatingId}
                     onNavigate={(id) => setNavigatingId(navigatingId === id ? null : id)}
                   />
@@ -687,8 +688,8 @@ const App: React.FC = () => {
                         className="text-center py-12 bg-white/40 rounded-3xl border border-dashed border-slate-300"
                       >
                         <p className="text-slate-400 font-medium whitespace-pre-line">
-                          {filter === 'active' 
-                            ? "Your world is quiet.\nTap + to map a new memory." 
+                          {filter === 'active'
+                            ? "Your world is quiet.\nTap + to map a new memory."
                             : `No ${filter} reminders yet.`}
                         </p>
                       </motion.div>
@@ -701,11 +702,10 @@ const App: React.FC = () => {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.95 }}
                           whileHover={{ y: -4 }}
-                          className={`relative z-10 p-6 rounded-3xl border shadow-xl transition-all duration-300 ${
-                            navigatingId === reminder.id && filter === 'active'
+                          className={`relative z-10 p-6 rounded-3xl border shadow-xl transition-all duration-300 ${navigatingId === reminder.id && filter === 'active'
                               ? "bg-blue-50/90 backdrop-blur-xl border-blue-400 ring-2 ring-blue-500/30"
                               : "bg-white/80 backdrop-blur-xl border-slate-200"
-                          }`}
+                            }`}
                         >
                           <div className="flex justify-between items-start mb-2">
                             <div className="flex-1 mr-3">
@@ -723,11 +723,10 @@ const App: React.FC = () => {
                               {filter === 'active' && (
                                 <button
                                   onClick={() => setNavigatingId(navigatingId === reminder.id ? null : reminder.id)}
-                                  className={`px-3 py-1 text-xs font-bold rounded-xl transition-colors ${
-                                    navigatingId === reminder.id
+                                  className={`px-3 py-1 text-xs font-bold rounded-xl transition-colors ${navigatingId === reminder.id
                                       ? "bg-red-100 text-red-600 hover:bg-red-200"
                                       : "bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-200"
-                                  }`}
+                                    }`}
                                 >
                                   {navigatingId === reminder.id ? "Stop Route" : "Navigate"}
                                 </button>
@@ -735,11 +734,10 @@ const App: React.FC = () => {
                               <button
                                 onClick={() => deleteReminder(reminder.id)}
                                 disabled={deletingId === reminder.id}
-                                className={`transition p-1.5 rounded-lg ${
-                                  deletingId === reminder.id
+                                className={`transition p-1.5 rounded-lg ${deletingId === reminder.id
                                     ? "opacity-25 cursor-not-allowed"
                                     : "opacity-50 hover:bg-red-50 hover:text-red-500 hover:opacity-100"
-                                }`}
+                                  }`}
                               >
                                 <Trash2 size={16} />
                               </button>
