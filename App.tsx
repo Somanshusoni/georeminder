@@ -185,9 +185,17 @@ const App: React.FC = () => {
                 routePoints = routeData.routes[0].legs[0].points.map((p: any) => [p.latitude, p.longitude]);
               }
               changed = true;
+            } else {
+              console.warn("TomTom found no route. Is it too far for walking?");
+              routeDist = -1; // Prevents infinite retry loop
+              routeETA = "No Route Possible";
+              changed = true;
             }
           } catch(e) {
              console.error("Route fetch failed", e);
+             routeDist = -1;
+             routeETA = "API Error";
+             changed = true;
           }
 
           if (changed) {
@@ -698,10 +706,17 @@ const App: React.FC = () => {
                               {reminder.radiusMeters}m
                             </div>
 
-                            {reminder.routeDistance && reminder.routeETA && (
+                            {reminder.routeDistance !== undefined && reminder.routeDistance !== -1 && reminder.routeETA && (
                               <div className="flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-1 rounded-md">
                                 <Navigation size={12} />
                                 {reminder.routeETA} ({formatDistance(reminder.routeDistance)})
+                              </div>
+                            )}
+
+                            {reminder.routeDistance === -1 && (
+                              <div className="flex items-center gap-1 bg-red-100 text-red-700 px-2 py-1 rounded-md">
+                                <Navigation size={12} />
+                                {reminder.routeETA}
                               </div>
                             )}
 
