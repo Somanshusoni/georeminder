@@ -18,6 +18,7 @@ import {
   Activity,
   Moon,
   Sun,
+  Navigation,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Reminder, UserLocation, GeoStatus } from "./types";
@@ -118,7 +119,92 @@ const App: React.FC = () => {
     return () => unsub();
   }, [currentScreen]);
 
-  /* ================= TRACKING ================= */
+  /* ================= TRACKING & ROUTING POLLING ================= */
+
+  const lastRouteFetch = useRef<number>(0);
+
+  useEffect(() => {
+    if (!trackingStatus.active || !userLoc) return;
+
+    const now = Date.now();
+    if (now - lastRouteFetch.current > 180000) { // 3 mins polling interval
+      lastRouteFetch.current = now;
+
+      const fetchRoutes = async () => {
+        const tomtomKey = import.meta.env.VITE_TOMTOM_API_KEY;
+        const activeReminders = remindersRef.current.filter(r => r.status === 'active');
+        
+        if (activeReminders.length === 0) return;
+        
+        let hasChanges = false;
+        const updatedReminders = await Promise.all(activeReminders.map(async (r) => {
+          let targetLat = r.lat;
+          let targetLng = r.lng;
+          let changed = false;
+
+          // 1. Dynamic Nearest Shop
+          if (r.searchCategory) {
+            try {
+              const geoRes = await fetch(
+                `https://api.tomtom.com/search/2/search/${encodeURIComponent(r.searchCategory)}.json?key=${tomtomKey}&limit=1&countrySet=IN&lat=${userLoc.lat}&lon=${userLoc.lng}&radius=50000`
+              );
+              const geoData = await geoRes.json();
+              if (geoData.results && geoData.results[0]) {
+                const nearest = geoData.results[0].position;
+                if (nearest.lat !== targetLat || nearest.lon !== targetLng) {
+                  targetLat = nearest.lat;
+                  targetLng = nearest.lon;
+                  changed = true;
+                }
+              }
+            } catch (e) {
+              console.error("Dynamic search failed", e);
+            }
+          }
+
+          // 2. Fetch Route
+          let routeDist = r.routeDistance;
+          let routeETA = r.routeETA;
+          let routePoints = r.routePoints;
+          
+          try {
+            const routeRes = await fetch(
+              `https://api.tomtom.com/routing/1/calculateRoute/${userLoc.lat},${userLoc.lng}:${targetLat},${targetLng}/json?key=${tomtomKey}&travelMode=${r.travelMode || 'walking'}`
+            );
+            const routeData = await routeRes.json();
+            if (routeData.routes && routeData.routes[0]) {
+              const summary = routeData.routes[0].summary;
+              routeDist = summary.lengthInMeters;
+              const mins = Math.ceil(summary.travelTimeInSeconds / 60);
+              routeETA = `${mins} min${mins > 1 ? 's' : ''}`;
+              
+              if (routeData.routes[0].legs && routeData.routes[0].legs[0].points) {
+                routePoints = routeData.routes[0].legs[0].points.map((p: any) => [p.latitude, p.longitude]);
+              }
+              changed = true;
+            }
+          } catch(e) {
+             console.error("Route fetch failed", e);
+          }
+
+          if (changed) {
+            hasChanges = true;
+            return { ...r, lat: targetLat, lng: targetLng, routeDistance: routeDist, routeETA, routePoints };
+          }
+          return r;
+        }));
+
+        if (hasChanges) {
+           setReminders(prev => prev.map(p => {
+              const updated = updatedReminders.find(u => u.id === p.id);
+              return updated ? { ...p, ...updated } : p;
+           }));
+        }
+      };
+
+      fetchRoutes();
+    }
+  }, [userLoc?.lat, userLoc?.lng, trackingStatus.active]);
 
   const startTracking = useCallback(() => {
     if (!navigator.geolocation) return;
@@ -172,7 +258,7 @@ const App: React.FC = () => {
           // Browser Notification
           if ("Notification" in window && Notification.permission === "granted") {
             new Notification(`🔔 Arrived at ${triggered.title}`, {
-              body: triggered.notes || "You have a reminder here!",
+              body: (triggered.items && triggered.items.length > 0) ? triggered.items.join(', ') : "You have a reminder here!",
               icon: "/icon-192.png",
             });
           }
@@ -185,7 +271,7 @@ const App: React.FC = () => {
 
           // Generate AI contextual message for the popup
           setAiTriggeredMessage(null);
-          generateTriggeredMessage(triggered.title, triggered.notes, triggered.createdAt)
+          generateTriggeredMessage(triggered.title, triggered.items ? triggered.items.join(', ') : "", triggered.createdAt)
             .then((msg) => setAiTriggeredMessage(msg))
             .catch(() => {});
 
@@ -209,6 +295,7 @@ const App: React.FC = () => {
       watchIdRef.current = null;
     }
     setTrackingStatus((prev) => ({ ...prev, active: false }));
+    lastRouteFetch.current = 0; // Reset so it fetches immediately when started again
   }, []);
 
   /* ================= ADD ================= */
@@ -225,7 +312,7 @@ const App: React.FC = () => {
         status: "active",
       });
 
-      categorizeReminder(data.title, data.notes)
+      categorizeReminder(data.title, data.items ? data.items.join(', ') : "")
         .then(({ category, emoji, categoryColor }) =>
           updateDoc(doc(db, "reminders", docRef.id), { category, emoji, categoryColor })
         )
@@ -451,7 +538,7 @@ const App: React.FC = () => {
                       }).catch(() => {});
 
                       setAiTriggeredMessage(null);
-                      generateTriggeredMessage(triggered.title, triggered.notes, triggered.createdAt)
+                      generateTriggeredMessage(triggered.title, triggered.items ? triggered.items.join(', ') : "", triggered.createdAt)
                         .then((msg) => setAiTriggeredMessage(msg))
                         .catch(() => {});
 
@@ -567,8 +654,12 @@ const App: React.FC = () => {
                             </button>
                           </div>
 
-                          {reminder.notes && (
-                            <p className="text-sm opacity-70 mb-3">{reminder.notes}</p>
+                          {reminder.items && reminder.items.length > 0 && (
+                            <ul className="text-sm opacity-80 mb-3 list-disc pl-5 font-medium">
+                              {reminder.items.map((item, i) => (
+                                <li key={i}>{item}</li>
+                              ))}
+                            </ul>
                           )}
 
                           <div className="flex gap-3 text-xs font-medium">
@@ -577,7 +668,14 @@ const App: React.FC = () => {
                               {reminder.radiusMeters}m
                             </div>
 
-                            {reminder.lastDistance && (
+                            {reminder.routeDistance && reminder.routeETA && (
+                              <div className="flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-1 rounded-md">
+                                <Navigation size={12} />
+                                {reminder.routeETA} ({formatDistance(reminder.routeDistance)})
+                              </div>
+                            )}
+
+                            {reminder.lastDistance && !reminder.routeDistance && (
                               <div className="bg-gray-100 px-2 py-1 rounded-md">
                                 {formatDistance(reminder.lastDistance)}
                               </div>

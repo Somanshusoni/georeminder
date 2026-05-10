@@ -46,9 +46,13 @@ export const TriggeredReminderModal: React.FC<TriggeredReminderModalProps> = ({ 
             </div>
           )}
 
-          {reminder.notes && (
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 italic text-slate-600">
-              {reminder.notes}
+          {reminder.items && reminder.items.length > 0 && (
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-slate-600 font-medium">
+              <ul className="list-disc pl-5 space-y-1">
+                {reminder.items.map((item, idx) => (
+                  <li key={idx}>{item}</li>
+                ))}
+              </ul>
             </div>
           )}
 

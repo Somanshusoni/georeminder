@@ -3,6 +3,8 @@ import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle } from 'react-leaflet';
 import L from 'leaflet';
 
+const TOMTOM_KEY = import.meta.env.VITE_TOMTOM_API_KEY;
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -48,8 +50,8 @@ export const MapPicker: React.FC<MapPickerProps> = ({ initialLat, initialLng, ra
     <div className="h-64 w-full relative overflow-hidden rounded-lg shadow-inner border border-slate-200">
       <MapContainer center={[initialLat, initialLng]} zoom={15} scrollWheelZoom={true}>
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.tomtom.com">TomTom</a>'
+          url={`https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?key=${TOMTOM_KEY}&tileSize=256`}
         />
         <LocationMarker lat={initialLat} lng={initialLng} radius={radius} onLocationSelect={onLocationSelect} />
       </MapContainer>

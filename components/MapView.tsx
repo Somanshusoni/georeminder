@@ -1,9 +1,11 @@
 
 import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { Reminder, UserLocation } from '../types';
 import { formatDistance } from '../utils/geoUtils';
+
+const TOMTOM_KEY = import.meta.env.VITE_TOMTOM_API_KEY;
 
 // Fix for default marker icons
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -52,8 +54,8 @@ export const MapView: React.FC<MapViewProps> = ({ reminders, userLoc, filter }) 
         zoomControl={false}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.tomtom.com">TomTom</a>'
+          url={`https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?key=${TOMTOM_KEY}&tileSize=256`}
         />
         
         {userLoc && (
@@ -73,10 +75,22 @@ export const MapView: React.FC<MapViewProps> = ({ reminders, userLoc, filter }) 
                     <span className="text-xl">{r.emoji || '📌'}</span>
                     <h4 className="font-bold text-slate-800">{r.title}</h4>
                   </div>
-                  <p className="text-xs text-slate-500 mb-2">{r.notes}</p>
-                  <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider text-indigo-500">
-                    <span>{r.radiusMeters}m radius</span>
-                    {r.lastDistance && <span>{formatDistance(r.lastDistance)} away</span>}
+                  {r.items && r.items.length > 0 && (
+                    <ul className="text-xs text-slate-500 mb-2 list-disc pl-4 font-medium">
+                      {r.items.map((item, i) => <li key={i}>{item}</li>)}
+                    </ul>
+                  )}
+                  <div className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-500">
+                    <div className="flex justify-between items-center">
+                      <span>{r.radiusMeters}m radius</span>
+                      {r.lastDistance && !r.routeDistance && <span>{formatDistance(r.lastDistance)} away</span>}
+                    </div>
+                    {r.routeDistance && r.routeETA && (
+                      <div className="flex justify-between items-center text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                        <span>{r.travelMode || 'Walking'} ETA:</span>
+                        <span>{r.routeETA} ({formatDistance(r.routeDistance)})</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </Popup>
@@ -91,6 +105,19 @@ export const MapView: React.FC<MapViewProps> = ({ reminders, userLoc, filter }) 
                 dashArray: '5, 10'
               }} 
             />
+            {r.routePoints && r.routePoints.length > 0 && (
+              <Polyline 
+                positions={r.routePoints} 
+                pathOptions={{ 
+                  color: r.status === 'triggered' ? '#ef4444' : '#3b82f6', 
+                  weight: 5, 
+                  opacity: 0.7,
+                  dashArray: r.status === 'triggered' ? undefined : '10, 10',
+                  lineCap: 'round',
+                  lineJoin: 'round'
+                }} 
+              />
+            )}
           </React.Fragment>
         ))}
 

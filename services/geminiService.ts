@@ -37,17 +37,20 @@ export async function getSmartReminderInfo(prompt: string) {
 
     const parsed = JSON.parse(response.text || "{}");
     
-    // Attempt to geocode via OpenStreetMap (Nominatim)
+    // Attempt to geocode via TomTom Search API
     if (parsed.locationName) {
       try {
-        const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(parsed.locationName)}&limit=1`);
+        const tomtomKey = import.meta.env.VITE_TOMTOM_API_KEY;
+        const geoRes = await fetch(`https://api.tomtom.com/search/2/search/${encodeURIComponent(parsed.locationName)}.json?key=${tomtomKey}&limit=1`);
         const geoData = await geoRes.json();
-        if (geoData && geoData.length > 0) {
-          parsed.lat = parseFloat(geoData[0].lat);
-          parsed.lng = parseFloat(geoData[0].lon);
+        if (geoData.results && geoData.results.length > 0) {
+          const place = geoData.results[0];
+          parsed.lat = place.position.lat;
+          parsed.lng = place.position.lon;
+          parsed.formattedAddress = place.address?.freeformAddress || place.poi?.name;
         }
       } catch (e) {
-        console.warn("Geocoding failed:", e);
+        console.warn("TomTom geocoding failed:", e);
       }
     }
 
