@@ -30,6 +30,13 @@ export interface Reminder {
   routePoints?: [number, number][]; // Points for drawing the polyline
   searchCategory?: string; // If set, this is a dynamic search destination
   travelMode?: TravelMode;
+  // Continuous Waypoint Routing fields
+  finalLat?: number;
+  finalLng?: number;
+  finalAddress?: string;
+  isWaypointRouting?: boolean;
+  waypointName?: string;
+  
   // AI auto-categorization fields
   category?: ReminderCategory;
   emoji?: string;

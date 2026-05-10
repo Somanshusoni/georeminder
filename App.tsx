@@ -145,8 +145,49 @@ const App: React.FC = () => {
           let targetLng = r.lng;
           let changed = false;
 
-          // 1. Dynamic Nearest Shop
-          if (r.searchCategory) {
+          const modeMap: Record<string, string> = {
+            'walking': 'pedestrian',
+            'driving': 'car',
+            'cycling': 'bicycle'
+          };
+
+          // 1. Dynamic Nearest Shop or Search Along Route
+          if (r.isWaypointRouting && r.finalLat && r.finalLng && r.searchCategory) {
+            try {
+              // Get base route first
+              const ttMode = modeMap[r.travelMode || 'walking'] || 'pedestrian';
+              const baseRouteRes = await fetch(
+                `https://api.tomtom.com/routing/1/calculateRoute/${userLoc.lat},${userLoc.lng}:${r.finalLat},${r.finalLng}/json?key=${tomtomKey}&travelMode=${ttMode}`
+              );
+              const baseRouteData = await baseRouteRes.json();
+              if (baseRouteData.routes && baseRouteData.routes[0]) {
+                // Extract points for LineString (lon, lat)
+                const points = baseRouteData.routes[0].legs[0].points.map((p: any) => [p.longitude, p.latitude]);
+                
+                // Search Along Route (POST)
+                const searchRes = await fetch(
+                  `https://api.tomtom.com/search/2/searchAlongRoute/${encodeURIComponent(r.searchCategory)}.json?key=${tomtomKey}&maxDetourTime=900&limit=1`,
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ route: { lineString: points } })
+                  }
+                );
+                const searchData = await searchRes.json();
+                if (searchData.results && searchData.results[0]) {
+                  const waypoint = searchData.results[0].position;
+                  if (waypoint.lat !== targetLat || waypoint.lon !== targetLng) {
+                     targetLat = waypoint.lat;
+                     targetLng = waypoint.lon;
+                     changed = true;
+                  }
+                }
+              }
+            } catch (e) {
+              console.error("Search along route failed", e);
+            }
+          } else if (r.searchCategory && !r.isWaypointRouting) {
+            // Original Dynamic Nearest Shop logic
             try {
               const geoRes = await fetch(
                 `https://api.tomtom.com/search/2/search/${encodeURIComponent(r.searchCategory)}.json?key=${tomtomKey}&limit=1&countrySet=IN&lat=${userLoc.lat}&lon=${userLoc.lng}&radius=50000`
@@ -171,15 +212,16 @@ const App: React.FC = () => {
           let routePoints = r.routePoints;
           
           try {
-            const modeMap: Record<string, string> = {
-              'walking': 'pedestrian',
-              'driving': 'car',
-              'cycling': 'bicycle'
-            };
             const ttMode = modeMap[r.travelMode || 'walking'] || 'pedestrian';
 
+            // Route coordinates string: origin:waypoint1:destination
+            let routeCoords = `${userLoc.lat},${userLoc.lng}:${targetLat},${targetLng}`;
+            if (r.isWaypointRouting && r.finalLat && r.finalLng) {
+               routeCoords = `${userLoc.lat},${userLoc.lng}:${targetLat},${targetLng}:${r.finalLat},${r.finalLng}`;
+            }
+
             const routeRes = await fetch(
-              `https://api.tomtom.com/routing/1/calculateRoute/${userLoc.lat},${userLoc.lng}:${targetLat},${targetLng}/json?key=${tomtomKey}&travelMode=${ttMode}`
+              `https://api.tomtom.com/routing/1/calculateRoute/${routeCoords}/json?key=${tomtomKey}&travelMode=${ttMode}`
             );
             const routeData = await routeRes.json();
             if (routeData.routes && routeData.routes[0]) {
@@ -188,9 +230,14 @@ const App: React.FC = () => {
               const mins = Math.ceil(summary.travelTimeInSeconds / 60);
               routeETA = `${mins} min${mins > 1 ? 's' : ''}`;
               
-              if (routeData.routes[0].legs && routeData.routes[0].legs[0].points) {
-                routePoints = routeData.routes[0].legs[0].points.map((p: any) => [p.latitude, p.longitude]);
-              }
+              // Flatten points across all legs (multiple legs for waypoint routes)
+              const allPoints: [number, number][] = [];
+              routeData.routes[0].legs.forEach((leg: any) => {
+                if (leg.points) {
+                   allPoints.push(...leg.points.map((p: any) => [p.latitude, p.longitude] as [number, number]));
+                }
+              });
+              routePoints = allPoints;
               changed = true;
             } else {
               console.warn("TomTom found no route. Is it too far for walking?");

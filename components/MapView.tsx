@@ -26,6 +26,17 @@ const userIcon = L.divIcon({
   iconAnchor: [8, 8],
 });
 
+// Final Destination Marker (Green Pulse)
+const finalDestIcon = L.divIcon({
+  className: 'final-dest-marker',
+  html: `<div class="relative">
+    <div class="absolute -inset-2 bg-green-500 rounded-full animate-ping opacity-25"></div>
+    <div class="relative w-4 h-4 bg-green-600 border-2 border-white rounded-full shadow-lg"></div>
+  </div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+});
+
 interface MapViewProps {
   reminders: Reminder[];
   userLoc: UserLocation | null;
@@ -136,6 +147,16 @@ export const MapView: React.FC<MapViewProps> = ({ reminders, userLoc, filter, na
                   lineJoin: 'round'
                 }} 
               />
+            )}
+            {r.isWaypointRouting && r.finalLat && r.finalLng && (
+              <Marker position={[r.finalLat, r.finalLng]} icon={finalDestIcon}>
+                <Popup className="rounded-xl">
+                  <div className="p-1 font-bold text-green-700">
+                    🏁 Final Destination<br/>
+                    <span className="text-xs font-medium text-green-600">{r.finalAddress || 'End Point'}</span>
+                  </div>
+                </Popup>
+              </Marker>
             )}
           </React.Fragment>
         ))}

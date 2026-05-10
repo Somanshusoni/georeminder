@@ -24,6 +24,7 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
   const [newItem, setNewItem] = useState('');
   const [searchCategory, setSearchCategory] = useState<string>('');
   const [isDynamicNearest, setIsDynamicNearest] = useState(false);
+  const [isWaypointMode, setIsWaypointMode] = useState(false);
   const [travelMode, setTravelMode] = useState<TravelMode>('walking');
   const [radius, setRadius] = useState(200);
   const [lat, setLat] = useState(userLat);
@@ -66,13 +67,25 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
       items, 
       originalInput: fullInput,
       radiusMeters: radius, 
-      lat, 
-      lng,
       travelMode,
     };
-    if (isDynamicNearest && searchCategory) {
+    
+    if (isWaypointMode && searchCategory) {
+      reminderData.isWaypointRouting = true;
+      reminderData.finalLat = lat;
+      reminderData.finalLng = lng;
+      reminderData.finalAddress = locationInput;
       reminderData.searchCategory = searchCategory;
+      reminderData.lat = userLat; // temporary target until route is calculated
+      reminderData.lng = userLng;
+    } else {
+      reminderData.lat = lat;
+      reminderData.lng = lng;
+      if (isDynamicNearest && searchCategory) {
+        reminderData.searchCategory = searchCategory;
+      }
     }
+    
     onSave(reminderData);
     
     setTitle('');
@@ -81,6 +94,7 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
     setNewItem('');
     setSearchCategory('');
     setIsDynamicNearest(false);
+    setIsWaypointMode(false);
     onClose();
   };
 
@@ -371,26 +385,57 @@ export const AddReminderModal: React.FC<AddReminderModalProps> = ({ isOpen, onCl
             </div>
 
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={isDynamicNearest}
-                  onChange={(e) => setIsDynamicNearest(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-                <span className="text-sm font-semibold text-slate-700">Always reroute to nearest shop</span>
-              </label>
-              {isDynamicNearest && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Store Category (e.g. Supermarket, Pharmacy)</label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="radio" 
+                    checked={!isWaypointMode && !isDynamicNearest}
+                    onChange={() => { setIsWaypointMode(false); setIsDynamicNearest(false); }}
+                    className="w-4 h-4 text-blue-600"
+                    name="routingMode"
+                  />
+                  <span className="text-sm font-semibold text-slate-700">Static Destination (Go to Pin)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="radio" 
+                    checked={!isWaypointMode && isDynamicNearest}
+                    onChange={() => { setIsWaypointMode(false); setIsDynamicNearest(true); }}
+                    className="w-4 h-4 text-blue-600"
+                    name="routingMode"
+                  />
+                  <span className="text-sm font-semibold text-slate-700">Dynamic (Find nearest shop)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="radio" 
+                    checked={isWaypointMode}
+                    onChange={() => { setIsWaypointMode(true); setIsDynamicNearest(false); }}
+                    className="w-4 h-4 text-blue-600"
+                    name="routingMode"
+                  />
+                  <span className="text-sm font-semibold text-slate-700">On The Way (Find shop on path to Pin)</span>
+                </label>
+              </div>
+
+              {(isDynamicNearest || isWaypointMode) && (
+                <div className="mt-3 pt-3 border-t border-slate-200">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    {isWaypointMode ? "Shop Category (e.g. Pharmacy, ATM)" : "Store Category (e.g. Supermarket)"}
+                  </label>
                   <input
                     type="text"
+                    required={(isDynamicNearest || isWaypointMode)}
                     value={searchCategory}
                     onChange={(e) => setSearchCategory(e.target.value)}
-                    placeholder="Enter category to search dynamically..."
-                    className="w-full px-3 py-1.5 text-sm border rounded-lg focus:ring-1 focus:ring-blue-500 outline-none"
+                    placeholder={isWaypointMode ? "What do you need on the way?" : "Enter category..."}
+                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   />
-                  <p className="text-[10px] text-slate-400 mt-1">App will search for the nearest "{searchCategory || 'shop'}" every 3 mins while tracking.</p>
+                  <p className="text-[10px] text-slate-500 mt-1.5 font-medium leading-tight">
+                    {isWaypointMode 
+                      ? `The map pin below will be your FINAL destination. The app will route you there and find a "${searchCategory || 'shop'}" on the path!`
+                      : `App will search for the nearest "${searchCategory || 'shop'}" every 3 mins while tracking.`}
+                  </p>
                 </div>
               )}
             </div>
